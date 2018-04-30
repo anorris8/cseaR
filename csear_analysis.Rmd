@@ -1,0 +1,718 @@
+---
+title: "Cell type specific enrichment analysis with R (cseaR)"
+subtitle: "created 2017-06-27; modified 2018-04-30"
+author: "Alexis Norris" 
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    latex_engine: xelatex
+    fig_caption: true
+    fig_crop: false
+    toc: true
+    toc_depth: 2
+    number_sections: true  
+fontsize: 12pt
+linkcolor: blue
+urlcolor: blue
+---
+
+# Load genelists and dge (`limma`) results  
+  * *resList* = list of data frames with *full* `limma` results for each test/comparison  
+  * *geneList* = list of vectors each with *genes* (`HGNC symbols`) that are significant (e.g. FDR < 0.05) for each test/comparison  
+  * Must be *HGNC symbols* (not other IDs or MGI symbols!)  
+  * Using ranked & signed t-statistic, if using `edgeR` data, use LR (after signing it for direction)    
+
+# Using significance cutoff (pSI, EWCE)
+
+## Setup   
+```{r sig_setup}
+# Libraries -----------------------------------------
+library(pSI)
+library(EWCE)
+
+# Functions -----------------------------------------
+### Get genes driving EWCE overlap
+ewce.getgenes <- function (hitGenes, sct_data) {
+  ValidGenes = rownames(sct_data$cell_dists)[rownames(sct_data$cell_dists) %in% hitGenes]
+  temp = sct_data$cell_dists[ValidGenes, ]
+  return(temp)
+}
+
+# Cell data -----------------------------------------
+load("input/pSI_celldata.rda") # psi_barresHg, psi_barresMm, psi_darmanis_celltype, psi_lakeCelltype, psi_linn, psi_linnSub
+```
+
+## pSI 
+
+### Human celldata
+
+#### Remove genes not in the celldata
+```{r sig_psi_human_check}
+# Darmanis --------------------------------------
+### Change "-" to "." (e.g. HLA-DMB -> HLA.DMB) 
+geneList_Darmanis <- lapply(geneList, function (x) gsub("\\-", "\\.", x))
+geneList_Darmanis <- lapply(geneList_Darmanis, function (x) x[which(x %in% rownames(psi_darmanis_celltype))])
+
+# Lake ------------------------------------------
+geneList_Lake <- lapply(geneList, function (x) x[which(x %in% rownames(psi_lakeCelltype))])
+
+# Barres Hg -------------------------------------
+### Missing all March/Sept/Oct/Dec genes!
+geneList_BarresHg <- lapply(geneList, function (x) x[which(x %in% rownames(psi_barresHg))])
+```
+
+#### Run stattests
+```{r sig_psi_human_run}
+res_psi <- list()
+
+## Lake -----------------------------------------
+for (i in names(geneList_Lake)) {
+  set.seed(1116)
+  res_psi$lake[[i]] = fisher.iteration(
+    psi_lakeCelltype, 
+    candidate.genes = geneList_Lake[[i]])
+}
+
+## Darmanis -------------------------------------
+for (i in names(geneList_Darmanis)) {
+  print(i)
+  set.seed(1116)
+  res_psi$darmanis2[[i]] <- fisher.iteration(
+    psi_darmanis_celltype, 
+    candidate.genes = geneList_Darmanis[[i]])
+}
+
+## Barres ---------------------------------------
+for (i in names(geneList_BarresHg)) {
+  set.seed(1116)
+  res_psi$barresHg[[i]] <- fisher.iteration(
+    psi_barresHg, 
+    candidate.genes = geneList_BarresHg[[i]])
+}
+```
+
+### Mouse celldata
+
+#### Get mouse homologs  
+```{r sig_mouse_convert}
+load("input/HumanMouseGeneKey.rda")  # h2m
+
+### Convert to mouse gene symbols
+geneList_mouse <- lapply(geneList, function (x) {
+  x <- h2m %>%
+    filter(HGNC %in% x) %>%
+    select(MGI) %>%
+    unique() 
+  na.omit(as.character(x$MGI))
+})
+```
+
+#### Remove genes not in the celldata
+```{r sig_psi_mouse_check}
+# Linnarsson --------------------------------
+geneList_Linn <- lapply(geneList_mouse, function (x) x[which(x %in% rownames(psi_linn))])
+
+# Barres ------------------------------------
+geneList_BarresMm <- lapply(geneList_mouse, function (x) x[which(x %in% rownames(psi_barresMm))])
+```
+
+#### Run stattests
+```{r sig_psi_mouse_run}
+# Linn Mouse -------------------------------------
+for (i in names(geneList)) {
+  set.seed(1116)
+  res_psi$linnCell[[i]] <- fisher.iteration(
+    psi_linn, 
+    candidate.genes = geneList_Linn[[i]])
+}
+
+# Linn Mouse subtypes ----------------------------
+for (i in names(geneList)) {
+  set.seed(1116)
+  res_psi$linnSub[[i]] <- fisher.iteration(
+    psi_linnSub, 
+    candidate.genes = geneList_Linn[[i]])
+}
+
+# Barres Mouse -----------------------------------
+for (i in names(geneList)) {
+  set.seed(1116)
+  res_psi$barresMm[[i]] <- fisher.iteration(
+    psi_barresMm, 
+    candidate.genes = geneList_BarresMm[[i]])
+}
+```
+
+### Unlist, clean, export
+```{r sig_psi_wrangle}
+### Unlist, export as table
+res_psi_df <- do.call(rbind, lapply(res_psi, function (x) { # just results table
+  df <- do.call(rbind, x)
+  
+  ### Cleanup colnames
+  names(df) <- c("p0.05", "p0.01", "p0.001", "p0.0001")
+  
+  ### Separate into columns
+  df$analysis_id <- gsub("\\..*", "", rownames(df))
+  df$CellType <- gsub(".*\\.", "", rownames(df))
+  df$Dir <- gsub(".*_", "", df$analysis_id)
+  df$group <- gsub("_.*", "", df$analysis_id)
+  
+  ### Recalculate FDR
+  df$p0.05_FDR <- p.adjust(df$p0.05, method = "BH")
+  df$p0.01_FDR <- p.adjust(df$p0.01, method = "BH")
+  df$p0.001_FDR <- p.adjust(df$p0.001, method = "BH")
+  df$p0.0001_FDR <- p.adjust(df$p0.0001, method = "BH")
+  
+  ### Remove rownames and return df
+  rownames(df) <- NULL
+  df
+})) 
+res_psi_df$celldata <- gsub("\\..*", "", rownames(res_psi_df))
+rownames(res_psi_df) <- NULL
+readr::write_tsv(res_psi_df, "csea_pSI_all_df_long.tsv")
+```
+
+## EWCE
+
+### Functions
+```{r sig_ewce_fxns}
+### Load required packages
+library(EWCE)
+library(biomaRt)
+library(data.table)
+library(pander)
+
+### Setup parameters
+reps <- 20000 # for publishing use 20000
+```
+
+### Updated EWCE fxns, to allow SUB-celltype testing too  
+```{r sig_ewce_fxns}
+### Fix function from EWCE
+### version 2017-07-05
+read_celltype_data2 <- function (path, exprstart_row = 3, celltype_row = 1, subtype_row = 2, e_min = 0.2, sample_colstart = 2, sample_colend = 252) 
+{
+  ### exprstart_row is first row with expression data
+  ### Gene symbols are always the first column
+  
+  ### Darmanis (human SCT)
+  #exprstart_row = 3, celltype_row = 1, subtype_row = 2, e_min = 0.2, sample_colstart = 2, sample_colend = 252, path = ????
+  
+  ### Linnarsson (mouse SCT), exprstart_row = 11, celltype_row = 8, subtype_row = 9, e_min = 0.2, sample_colstart = 3, sample_colend = 3007, path = ????
+  
+  ### Lake (human neuron SCT), exprstart_row = 5, celltype_row = 2, subtype_row = 3, e_min = 0.2, sample_colstart = 2, sample_colend = 3084, path = "AnnoData/Celltypes/Lake_HumanSCT_Science2016/Lake-2016_Gene_TPM_filtered_forEWCE.txt" # note that row 1 = neuron class (Ex vs In)
+
+  if (!file.exists(path)) {
+    stop("File does not exist. Must provide a valid path to the file containing cell type expression data")
+  }
+  else {
+    expr_raw = read.csv(path, sep = "\t", stringsAsFactors = FALSE)
+    gene_symbols = expr_raw[exprstart_row:dim(expr_raw)[1], 1] 
+    if (!sum(duplicated(gene_symbols)) == 0) {
+      stop("Expression file contains multiple rows with the same gene name. Duplicates are not permitted")
+    }
+    expr = expr_raw[exprstart_row:dim(expr_raw)[1], sample_colstart:sample_colend]
+    cell_type = unlist(expr_raw[celltype_row, sample_colstart:sample_colend])
+    cell_type = gsub("_", "", cell_type)
+    subcell_type = sprintf(
+      "%s_%s", cell_type, 
+      unlist(expr_raw[subtype_row, sample_colstart:sample_colend]))
+    matching_cell_type = as.character(unique(data.frame(
+      cell_type = cell_type, subcell_type = subcell_type))[, "cell_type"])
+    expr2 = as.numeric(as.matrix(expr))
+    expr3 = matrix(as.numeric(
+      as.matrix(expr)), nrow = nrow(expr), ncol = ncol(expr))
+    rownames(expr3) = expr_raw[exprstart_row:dim(expr_raw)[1], 1]
+    count = 0
+    for (sct in unique(subcell_type)) {
+      count = count + 1
+      sub_expr = expr3[, subcell_type == sct]
+      if (is.null(dim(sub_expr)) == TRUE) { 
+        # for samples without replicates
+        sct_expr = data.frame(temp = sub_expr)
+      }
+      else {
+        # for samples with replicates
+        sct_expr = data.frame(temp = apply(sub_expr, 1, mean))
+      }
+      colnames(sct_expr) = sct
+      if (count == 1) {
+        all_scts = sct_expr
+      }
+      else {
+        all_scts = cbind(all_scts, sct_expr)
+      }
+    }
+    rownames(all_scts) = rownames(expr3)
+    keepGenes = rownames(all_scts)[apply(all_scts, 1, max) > e_min]
+    all_scts = all_scts[keepGenes, ]
+    cTs = unique(cell_type)
+    geneList = unique(rownames(all_scts))
+    count = 0
+    for (gs in geneList) {
+      count = count + 1
+      exp1 = unlist(all_scts[gs, ])
+      exp2 = exp1/sum(exp1)
+      exp3 = data.frame(e = exp2, cell = matching_cell_type)
+      exp4 = aggregate(exp3$e, sum, by = list(exp3$cell))
+      exp5 = data.frame(t(exp4[, 2]))
+      colnames(exp5) = as.character(exp4[, 1])
+      rownames(exp5) = gs
+      if (count == 1) {
+        cell_dists = exp5
+      }
+      else {
+        cell_dists = rbind(cell_dists, exp5)
+      }
+    }
+    scTs = unique(subcell_type)
+    geneList = unique(rownames(all_scts))
+    count = 0
+    for (gs in geneList) {
+      count = count + 1
+      exp1 = unlist(all_scts[gs, ])
+      exp2 = data.frame(t(exp1/sum(exp1)))
+      rownames(exp2) = gs
+      if (count == 1) {
+        subcell_dists = exp2
+      }
+      else {
+        subcell_dists = rbind(subcell_dists, exp2)
+      }
+    }
+    return(list(all_scts = all_scts, cell_dists = cell_dists, 
+                subcell_dists = subcell_dists))
+  }
+}
+
+bootstrap.enrichment.test.hg <- function (sct_data = NA, human.hits = NA, hg.bg = NA, reps = 20000, sub = FALSE) 
+{ 
+  control_related = prepare.genesize.control.network.hg(human.hits, hg.bg, numBOOT = reps)
+  control_network = control_related[["list_network"]]
+  hitGenes = control_related[["hitGenes"]]
+  
+  if (sub == TRUE) {
+    bootstrap_data = matrix(0, ncol = length(colnames(sct_data$subcell_dists)), nrow = reps)
+    cells = unique(colnames(sct_data$subcell_dists))
+    hit.cells = subcell.list.dist.hg(hitGenes, sct_data)
+  } 
+  else {
+    bootstrap_data = matrix(0, ncol = length(colnames(sct_data$cell_dists)), nrow = reps)
+    cells = unique(colnames(sct_data$cell_dists))
+    hit.cells = cell.list.dist.hg(hitGenes, sct_data)
+  }
+  for (s in 1:reps) {
+    bootstrap_set = control_network[s, ]
+    if (sub == TRUE) {
+      bootstrap_data[s, ] = subcell.list.dist.hg(bootstrap_set, sct_data)
+    }
+    else {
+      bootstrap_data[s, ] = cell.list.dist.hg(bootstrap_set, sct_data)
+    }
+  }
+  count = 0
+  for (ct in cells) {
+    print(ct)
+    count = count + 1
+    if (sub == TRUE) {
+      ct_boot_dist = bootstrap_data[, colnames(sct_data$subcell_dists) == ct]
+      hit_sum = hit.cells[colnames(sct_data$subcell_dists) == ct]
+    }
+    else {
+      ct_boot_dist = bootstrap_data[, colnames(sct_data$cell_dists) == ct]
+      hit_sum = hit.cells[colnames(sct_data$cell_dists) == ct]
+    }
+    p = sum(ct_boot_dist >= hit_sum)/reps
+    fold_change = hit_sum/mean(ct_boot_dist)
+    sd_from_mean = (hit_sum - mean(ct_boot_dist))/sd(ct_boot_dist)
+    if (sub == TRUE) {
+      ct_root = gsub("_.*", "", ct)
+    }
+    else {
+      ct_root = ct
+    }
+    if (p < 0.05) {
+      print(sprintf("p-value = %s", p))
+      print(sprintf("Fold enrichment = %s", fold_change))
+      print(sprintf("Standard deviations from mean = %s", sd_from_mean))
+    }
+    if (count == 1) {
+      results = data.frame(
+        CellType = ct, 
+        p = p, 
+        fold_change = fold_change,   
+        sd_from_mean = sd_from_mean)
+    } 
+    else {
+      results = rbind(
+        results,
+        data.frame(
+          CellType = ct, 
+          p = p, 
+          fold_change = fold_change, 
+          sd_from_mean = sd_from_mean))
+    }
+    print("")
+  }
+  full_results = list(
+    results = results, 
+    hit.cells = hit.cells, 
+    bootstrap_data = bootstrap_data)
+  return(full_results)
+}
+
+prepare.genesize.control.network.hg <- function (human.hits, hg.bg, numBOOT = 20000, seed = 1116) 
+{
+  combined_human_genes = unique(c(human.hits, hg.bg))
+  human <- useMart(
+    #host = "www.ensembl.org", 
+    host = "grch37.ensembl.org", 
+    path = "/biomart/martservice",
+    "ENSEMBL_MART_ENSEMBL",
+    dataset = "hsapiens_gene_ensembl")
+  hum_ens = getBM(
+    attributes = c("hgnc_symbol", "ensembl_gene_id"), 
+    filters = "hgnc_symbol", values = combined_human_genes, mart = human)
+  all_lengths = getBM(
+    attributes = c("transcript_length", "percentage_gene_gc_content", "ensembl_gene_id"), 
+    filters = "ensembl_gene_id", values = hum_ens$ensembl_gene_id, mart = human)
+  all_lengths = all_lengths[!is.na(all_lengths$transcript_length), ]
+  all_lens = merge(all_lengths, hum_ens, by = "ensembl_gene_id")
+  data_byGene = data.frame(data.table(all_lens)[ , lapply(.SD, mean), 
+                                                 by = hgnc_symbol, .SDcols = 2:3])
+  colnames(data_byGene) = c("HGNC.symbol", "transcript_lengths", 
+                            "percentage_gc_content")
+  data_byGene = data_byGene[data_byGene$HGNC.symbol != "", ]
+  tl_quants = quantile(data_byGene$transcript_length, probs = seq(0.1, 1, 0.1))
+  gc_quants = quantile(data_byGene$percentage_gc_content, probs = seq(0.1, 1, 0.1))
+  quadrant = matrix(0, nrow = dim(data_byGene)[1], ncol = 2)
+  colnames(quadrant) = c("TL", "GC")
+  for (i in 1:dim(data_byGene)[1]) {
+    quadrant[i,1] = which(data_byGene[i,2] < tl_quants)[1]
+    quadrant[i,2] = which(data_byGene[i,3] < gc_quants)[1]
+  }
+  data_byGene$uniq_quad = sprintf("%s_%s", quadrant[,1], quadrant[,2])
+  uq = data_byGene$uniq_quad
+  data_byGene = data_byGene[uq != "2_NA" & uq != "NA_2" & uq != "3_NA", ]
+  hitGenes_NEW = data_byGene[data_byGene$HGNC.symbol %in% human.hits,]$HGNC.symbol
+  list_genes1d = human.hits[human.hits %in% data_byGene$HGNC.symbol]
+  quad_genes = list()
+  for (uq in unique(data_byGene$uniq_quad)) {
+    quad_genes[[uq]] = unique(data_byGene[data_byGene$uniq_quad == uq,]$HGNC.symbol)
+  }
+  #print(dim(data_byGene))
+  #print(length(hitGenes_NEW))
+  list_network = matrix("", nrow = numBOOT, ncol = length(hitGenes_NEW))
+  count = 0
+  set.seed(seed)
+  for (gene in hitGenes_NEW) {
+    count = count + 1
+    this_gene_quad = data_byGene[data_byGene$HGNC.symbol == gene, "uniq_quad"][1]
+    #print(this_gene_quad)
+    candidates = as.vector(unlist(quad_genes[this_gene_quad]))
+    #print(candidates)
+    list_network[ , count] = sample(candidates, numBOOT, replace = TRUE)
+  }
+  print("CONTROLLED BOOTSTRAPPING NETWORK GENERATED")
+  return(list(hitGenes = hitGenes_NEW, list_network = list_network))
+}
+
+cell.list.dist.hg <- function (hitGenes, sct_data) 
+{
+  ValidGenes = rownames(sct_data$cell_dists)[rownames(sct_data$cell_dists) %in% hitGenes]
+  temp = sct_data$cell_dists[ValidGenes, ]
+  return(apply(temp, 2, sum))
+}
+  
+subcell.list.dist.hg <- function (hitGenes, sct_data) 
+{
+  ValidGenes = rownames(sct_data$subcell_dists)[rownames(sct_data$subcell_dists) %in% hitGenes]
+  temp = sct_data$subcell_dists[ValidGenes, ]
+  return(apply(temp, 2, sum))
+}
+```
+
+### Linnarsson Mouse SCT
+```{r sig_ewce_mouse}
+# Load linnarsson data --------------------------------------
+data("celltype_data")
+
+# Remove lists with <4 genes --------------------------------
+sapply(geneList_Linn, length)
+geneList_Linn <- geneList_Linn[lapply(geneList_Linn, length) > 3]
+
+# Stattests for celltypes -----------------------------------
+res_ewce <- list()
+for (i in names(geneList_Linn)) {
+  print(i)
+  bgkd <- unique(setdiff(rownames(celltype_data$all_scts), 
+                         geneList_Linn[[i]]))
+  set.seed(1116); seed <- 1116
+  res_ewce$linnCelltype[[i]] <- bootstrap.enrichment.test(
+    sct_data = celltype_data, 
+    reps = reps, 
+    mouse.hits = geneList_Linn[[i]], 
+    mouse.bg = bgkd,
+    sub = FALSE
+  )
+}
+
+# Stattests for cell subtypes -------------------------------
+for (i in names(geneList_Linn)) {
+  print(i)
+  set.seed(1116); seed <- 1116
+  res_ewce$linnSubtype[[i]] <- bootstrap.enrichment.test(
+    sct_data = celltype_data, 
+    reps = reps, 
+    mouse.hits = geneList_Linn[[i]], 
+    mouse.bg = bgkd,
+    sub = TRUE
+  )
+}
+
+# Unlist, export as table -----------------------------------
+for (h in names(res_ewce)) for (i in names(res_ewce[[h]])) { 
+  x <- as.data.frame(res_ewce[[h]][[i]]$results)
+  x$analysis_id <- i
+  x$CellType <- rownames(x)
+  rownames(x) <- NULL
+  x$FDR <- p.adjust(x$p, method = "BH")
+  res_ewce[[h]][[i]] <- x
+}
+
+# combine the 2 analyses
+res_ewce_df1 <- do.call(plyr::rbind.fill, res_ewce$linnCelltype)
+res_ewce_df2 <- do.call(plyr::rbind.fill, res_ewce$linnSubtype)
+res_ewce_df1$source <- "linnMmCelltype"
+res_ewce_df2$source <- "linnMmSubtype"
+res_ewce_df <- rbind(res_ewce_df1, res_ewce_df2)
+```
+
+### Lake Human SCT     
+Run In1-8, Ex1-8 (celltypes) and In1-8, Ex1-8 * 6 BAs (subtypes)  
+```{r sig_ewce_lake}
+# Load ------------------------------------------------------
+load("input/Lake-2016_Gene_TPM_filtered_forEWCE_sct_data.rda")
+
+# Run -------------------------------------------------------
+res_ewce_lake <- list()
+for (i in names(geneList_Lake)) {
+  print(i)
+  hg_bgkd <- unique(setdiff(rownames(sct_data$all_scts), 
+                            geneList_Lake[[i]]))
+  set.seed(1116); seed <- 1116
+  res_ewce_lake[[i]] <- bootstrap.enrichment.test.hg(
+    sct_data = sct_data, 
+    reps = reps, 
+    human.hits = geneList_Lake[[i]], 
+    hg.bg = hg_bgkd,
+    sub = TRUE
+  )
+}
+
+# Wrangle ------------------------------------------------
+### Unlist, export as table
+for (i in names(res_ewce_lake)) { 
+  x <- as.data.frame(res_ewce_lake[[i]]$results)
+  x$analysis_id <- i
+  x$CellType <- rownames(x)
+  rownames(x) <- NULL
+  x$FDR <- p.adjust(x$p, method = "BH")
+  res_ewce_lake[[i]] <- x
+}
+res_ewce_df <- do.call(plyr::rbind.fill, res_ewce_lake)
+```
+
+### Darmanis Human SCT  
+```{r sig_ewce_darmanis}
+# Load ------------------------------------------------------
+load("input/DarmanisHumanEWCE_cortexonly_EWCE.rda")
+
+# Run -------------------------------------------------------
+res_ewce_darmanis <- list()
+reps <- 20000
+for (i in names(geneList_Darmanis)) {
+  print(i)
+  hg_bgkd <- unique(setdiff(rownames(sct_darmanis$all_scts), 
+                            geneList_Darmanis[[i]]))
+  set.seed(1116); seed <- 1116
+  print(i)
+  res_ewce_darmanis[[i]] <- bootstrap.enrichment.test.hg(
+    sct_data = sct_darmanis, 
+    reps = reps, 
+    human.hits = geneList_Darmanis[[i]], 
+    hg.bg = hg_bgkd,
+    sub = FALSE
+  )
+}
+
+# Wrangle ------------------------------------------------
+### Unlist, export as table
+for (i in names(res_ewce_darmanis)) { 
+  x <- res_ewce_darmanis[[i]]$results
+  x$analysis_id <- i
+  rownames(x) <- NULL
+  x$FDR <- p.adjust(x$p, method = "BH")
+  res_ewce_darmanis[[i]] <- x
+}
+res_ewce_df <- do.call(plyr::rbind.fill, res_ewce_darmanis)
+```
+
+# Ranked  
+
+## Modified from `phenoTest::GSEA`  
+```{r ranked_phenoTest}
+# Libraries ---------------------------------------------------
+library(magrittr)
+library(tidyr)
+library(plyr)
+library(dplyr)
+
+# Load human cell data ----------------------------------------
+### Uses pSI cutoffs of 0.05, 0.01, 0.001, and 0.0001
+gsets <- readRDS("psi_celldata_geneSets_fcsea.rds")
+sapply(gsets, length)
+
+# Load dge results --------------------------------------------
+resList # list of full-table results from limma for each test
+
+# cse functions using phenoTest -------------------------------
+#source("https://bioconductor.org/biocLite.R")
+#biocLite("phenoTest")
+stats <- lapply(resList, function (df) {
+  df <- df[!is.na(df$feature_name), ] # feature_name = HGNC symbol
+  df <- df[!is.na(df$t), ]
+  df <- df[which(abs(df$t) > 0), ]
+  df <- df[order(df$t, decreasing = TRUE), ]
+  ### Note that duplicates (feature_name aka gene symbol) exist -- collapse by taking average in phenoTest::gsea
+  x <- df$t
+  names(x) <- df$feature_name
+  x
+})
+stats <- append(stats, degStats)
+
+### Run test
+csea_res <- list()
+for (h in names(stats)) {
+  x <- stats[[h]]
+  print(h)
+  
+  ### Remove celldata genes not in the universe of DGE features
+  gsets2 <- lapply(gsets, function (celldata) {
+    celldata[which(celldata %in% names(x))]
+  })
+  
+  ### min/max filters
+  gsets2 <- gsets2[which(lapply(gsets2, length) > 4)] # min 5 (default = 10)
+  gsets2 <- gsets2[which(lapply(gsets2, length) < 2501)] # max 2500 (default = 500)
+  
+  ### Get this error if >10 gsets (gam method error): Error in norm(sm$X, type = "I") : LAPACK routines cannot be loaded
+  ### gsea test, do in sets of 10 to avoid gam approxiation
+  cseaData <- list()
+  j <- 1
+  print(length(gsets2))
+  for (i in 1:(ceiling(length(gsets2)/10))) {
+  k <- j + 9
+  if (k > length(gsets2)) k = length(gsets2)
+  cseaData[[i]] <- phenoTest::gsea(
+    x, gsets2[j:k], 
+    logScale = FALSE, 
+    absVals = FALSE, 
+    averageRepeats = TRUE, 
+    B = 10000, 
+    mc.cores = 1, 
+    test = "perm", 
+    p.adjust.method = "none",      # recalculate FDR with ALL genesets
+    pval.comp.method = "original", # original or signed (default = original)
+    pval.smooth.tail = TRUE, 
+    minGenes = 5, maxGenes = 2500, 
+    center = FALSE
+  )$significance$summary           # extract results
+  print(cseaData[[i]])             # print results
+  j <- j + 10
+  }
+  
+  ### Combine results
+  cseaData <- as.data.frame(do.call(rbind, cseaData))
+  
+  ### Calculate FDR
+  cseaData$fdr <- p.adjust(cseaData$pval.nes, "BH")
+  
+  ### Save to list
+  csea_res[[h]] <- cseaData
+}
+
+### Clean, unlist, export
+csea_res <- lapply(csea_res, function (df) {
+  df <- as.data.frame(df)
+  df$info <- gsub("\\.", "_", rownames(df))
+  df$info <- gsub("0_05", "0.05", df$info)
+  df$info <- gsub("0_01", "0.01", df$info)
+  df$info <- gsub("0_001", "0.001", df$info)
+  df$info <- gsub("1e-04pSI", "0.0001", df$info)
+  df2 <- stringr::str_split_fixed(df$info, "_", 5)
+  colnames(df2) <- c("source", "celltype", "subtype", "delete", "psi_cutoff")
+  df3 <- cbind.data.frame(df2, df)
+  df3$delete <- NULL
+  df3
+})
+csea_res_df <- do.call(rbind, csea_res)
+csea_res_df$analysis <- gsub("\\..*", "", rownames(csea_res_df))
+readr::write_tsv(csea_res_df, "csea_ranked_results_all_table.tsv")
+```
+
+## [not updated!] Using `geneSetTest`   
+```{r ranked_geneSetTest}
+# Prepare dge/limma results -------------------------------------
+### Take logFC for region with lowest FDR; Up/Down separately in case some genes have alternative splicing changes  
+DupRemove <- function(df) {
+  # Separate into up and down
+  Dn <- subset(df, logFC < 0)
+  Up <- subset(df, logFC > 0)
+  # Sort by gene & pvalue (many have FDR=1), keep 1st of duplicate genes
+  Dn <- Dn[order(Dn$Gene, Dn$FDR, Dn$PValue), ]
+  Dn <- Dn[!duplicated(Dn$Gene), ]
+  Up <- Up[order(Up$Gene, Up$FDR, Up$PValue), ]
+  Up <- Up[!duplicated(Up$Gene), ]
+  # Combine the two
+  DnUp <- rbind.data.frame(Dn, Up)
+}
+results <- DupRemove(res)
+results$Gene <- as.character(results$Gene)
+
+#### Sign the statistic
+results$signedLR <- ifelse(results$logFC < 0, -results$LR, results$LR)
+
+# Load cell data ------------------------------------------------
+celldata <- readRDS("psi_celldata_geneSets_fcsea.rds") # not sure this is correct for below!
+
+# Run rank test -------------------------------------------------
+library(limma)
+res_Rank <- lapply(celldata, function(df) {
+  names(df)
+  lapply(df, function(x) {
+    names(x)
+    geneSetTest(index = ifelse(x %in% results$Gene, TRUE, FALSE), 
+                statistics = results$signedLR)
+  })
+})
+
+# Wrangling ------------------------------------------------
+# Combine all results into one data frame
+resRank <- data.frame("Source" = names(unlist(res_Rank)),
+                      "PValue" = unlist(res_Rank))
+# FDR adjust
+resRank$FDR <- p.adjust(resRank$PValue, method = "BH")
+
+# Print significant results
+resRank_sig <- subset(resRank, PValue < 0.05)
+rownames(resRank_sig) <- NULL
+pander(resRank_sig)
+
+# Print top 10
+resRank_top <- resRank[order(resRank$PValue, decreasing = F), ][1:10, ]
+rownames(resRank_top) <- NULL
+print(resRank_top)
+```
+
