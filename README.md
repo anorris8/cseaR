@@ -73,9 +73,8 @@ Average taken for replicates
 
 #### Cell breakdown
 
-Lake | FC  | PFC  |  VC  | mTC  | sTC  | aTC  | tot. | Linn. | Cell    
-Type | BA8 | BA10 | BA17 | BA21 | BA22 | BA41 |  n   | Type1 | Markers (not complete)2   
------| ----| -----| -----| -----|------|------|------|-------|-----------------------------------------------------------------------
+Lake | FC  | PFC  |  VC  | mTC  | sTC  | aTC  | tot. | Linn1 | Markers (not complete)2   
+
 Ex1  |  70 |  153 |   62 |  218 |  131 |  424 | 1058 |       | CNR+, CUX2+, THSD7A+, CBLN2+  
 Ex2  |  35 |   32 |    0 |   19 |    6 |    4 |   96 |       | CUX2+, RORB+, SYNPR+, THSD7A+, BHLHE22+, CBLN2+  
 Ex3  |   4 |   15 |  181 |    5 |   10 |   84 |  299 |       | CUX2+, RORB+, SYNPR+, THSD7A+, BHLHE22+, SV2C~  
@@ -84,7 +83,7 @@ Ex5  |  65 |   64 |   11 |   49 |   27 |   34 |  250 |       | SLC17A7++, RORB+,
 Ex6  |  42 |   37 |   10 |   31 |   11 |    8 |  139 |       | CDH11++, SULF1+, PDE9A+, HTR2C+, SYT6+, FOXP2+, PCP4+, CBLN2+, GRM4+    
 Ex7  |  21 |   37 |    1 |   29 |   17 |   10 |  115 |       | CNR1+, CBLN2+  
 Ex8  |   8 |   17 |    3 |    7 |    6 |    6 |   47 |       | SYNPR++, NR4A2++, OPRK+, PDE9A+, CBLN2+, SLC6A8+, ADRA2A+, NPY1R+  
------| ----| -----| -----| -----|------|------|------|-------|-----------------------------------------------------------------------
+
 In1  |  34 |   41 |    6 |   17 |   18 |   44 |  160 |       | CNR1+, VIP+, RELN+, CCK+ 
 In2  |   2 |   12 |    7 |    7 |    9 |   18 |   55 | ~Int6 | GAD1++, CNR1+, VIP+, OPRK1+, CCK+  
 In3  |  10 |   13 |    1 |   14 |    6 |   27 |   71 |       | PDE9A+, HTR2C+, VIP+, RELN+, CCK+, CNR1~  
@@ -93,8 +92,8 @@ In5  |  22 |   10 |    2 |   11 |    9 |    8 |   62 |       | SV2C+, LHX6+, CCK
 In6  |  77 |   18 |   16 |   37 |   18 |   73 |  239 |  Int3 | GAD1++, PVALB+, SULF1+, PDE9A+, LHX6+, ASIC2+, GRIK3+    
 In7  |   4 |    6 |    3 |    5 |   10 |   34 |   62 |  Int1 | SST+, LHX6+, NPY+, GRIK3+  
 In8  |  21 |   28 |   16 |   20 |   12 |   38 |  135 |  Int2 | SST+, LHX6+, CACNA1G+, RELN~  
------| ----| -----| -----| -----|------|------|------|-------|-----------------------------------------------------------------------
-n    | 564 |  328 |  513 |  329 |  880 |  469 | 3083 |       |
+
+N    | 564 |  328 |  513 |  329 |  880 |  469 | 3083 |       |
   
   * SLC17A7 aka VGLUT1  
   * GAD1 aka GAD67
